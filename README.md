@@ -145,6 +145,43 @@ async def stream_response():
 if __name__ == "__main__":
     asyncio.run(stream_response())
 ```
+### Curl Example
+
+```bash
+curl -i -X POST \
+   -H "Content-Type:application/json" \
+   -H "X-DeepSeek-API-Token:ollama" \
+   -H "X-OpenAI-API-Token:ollama" \
+   -H "X-Target-Model:openai" \
+   -H "X-DeepSeek-Endpoint-URL:http://127.0.0.1:11434/v1/chat/completions" \
+   -H "X-OpenAI-Endpoint-URL:http://localhost:11434/v1/chat/completions" \
+   -d \
+'{
+    "messages": [
+        {
+            "role": "user",
+            "content": "你是谁?"
+        }
+    ],
+    "system":"你是角色扮演助手,你可以完成角色扮演,但是你需要和用户对话,收集你进行角色班线需要的信息",
+    "stream": true,
+    "verbose": true,
+    "openai_config": {
+        "headers": {},
+        "body": {
+            "model": "qwen2.5:14b"
+        }
+    },
+    "deepseek_config": {
+        "headers": {},
+        "body": {
+            "model": "deepseek-r1:14b"
+        }
+    }
+}' \
+ 'http://127.0.0.1:3000'
+```
+
 
 ## Configuration Options
 
