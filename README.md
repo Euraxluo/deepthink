@@ -1,7 +1,5 @@
 <div align="center">
-<h1>DeepThink 🧠</h1>
-
-<img src="frontend/public/deepclaude.png" width="300">
+<h1>DeepThink 🐬🧠</h1>
 
 受 DeepClaude 项目启发，基于 Ollama 实现的本地化多模型推理框架，通过组合小型模型实现强大的推理和对话能力。
 
