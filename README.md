@@ -180,7 +180,7 @@ API 支持通过请求体进行广泛的配置：
 
 - `X-DeepSeek-API-Token`: Ollama 认证令牌（默认为 "ollama"）
 - `X-OpenAI-API-Token`: Ollama 认证令牌（默认为 "ollama"）
-- `X-Target-Model`: 目标模型类型（"openai" 或 "deepseek"）
+- `X-Target-Model`: 目标模型类型（"openai" 或 "anthropic",如果使用anthropic则需要apikey,建议去查看deepclaude 项目了）
 - `X-DeepSeek-Endpoint-URL`: DeepSeek 模型的 Ollama 端点
 - `X-OpenAI-Endpoint-URL`: OpenAI 兼容模型的 Ollama 端点
 
