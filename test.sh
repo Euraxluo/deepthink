@@ -13,7 +13,7 @@ curl -i -X POST \
             "content": "我是谁啊,小草莓?"
         }
     ],
-    "stream":false,
+    "stream":true,
     "deepseek_config": {
         "headers": {},
         "body": {

@@ -50,8 +50,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Load configuration
-    let config = Config::load().unwrap_or_else(|_| {
-        tracing::warn!("Failed to load config.toml, using default configuration");
+    let config = Config::load().unwrap_or_else(|e| {
+        tracing::warn!("Failed to load config.toml: {}", e);
         Config::default()
     });
 
@@ -69,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
     // Build router
     let app = Router::new()
         .route("/", post(handlers::handle_chat))
+        .route("/v1/chat/completions", post(handlers::handle_openai_chat))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state);

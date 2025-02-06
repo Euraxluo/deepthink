@@ -100,7 +100,7 @@ pub enum StreamEvent {
     Ping,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ContentDelta {
     #[serde(rename = "type")]
     pub delta_type: String,

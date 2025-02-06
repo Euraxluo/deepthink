@@ -10,11 +10,12 @@ use crate::{
         AnthropicClient, DeepSeekClient, OpenAIClient,
         DEEPSEEK_ENDPOINT_URL_HEADER, OPENAI_ENDPOINT_URL_HEADER, ANTHROPIC_ENDPOINT_URL_HEADER,
     },
-    config::Config,
+    config::{Config, ModelMapping, TokenConfig, EndpointConfig},
     error::{ApiError, Result, SseResponse},
     models::{
         ApiRequest, ApiResponse, ContentBlock,
         ExternalApiResponse, Message, Role, StreamEvent,
+        ApiConfig,
     },
 };
 
@@ -30,6 +31,9 @@ use chrono::Utc;
 use futures::StreamExt;
 use std::{sync::Arc, collections::HashMap};
 use tokio_stream::wrappers::ReceiverStream;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use axum::http::HeaderValue;
 
 /// Application state shared across request handlers.
 ///
@@ -322,15 +326,15 @@ pub(crate) async fn chat_stream(
     tokio::spawn(async move {
         let tx = tx.clone();
 
-        // Start event
-        let _ = tx
-            .send(Ok(Event::default().event("start").data(
-                serde_json::to_string(&StreamEvent::Start {
-                    created: Utc::now(),
-                })
-                .unwrap_or_default(),
-            )))
-            .await;
+        // // Start event
+        // let _ = tx
+        //     .send(Ok(Event::default().event("start").data(
+        //         serde_json::to_string(&StreamEvent::Start {
+        //             created: Utc::now(),
+        //         })
+        //         .unwrap_or_default(),
+        //     )))
+        //     .await;
 
         // Stream from DeepSeek
         let mut complete_reasoning = String::new();
@@ -338,15 +342,27 @@ pub(crate) async fn chat_stream(
         let mut deepseek_stream = deepseek_client.chat_stream(messages.clone(), &request_clone.deepseek_config);
         
         // Send initial thinking tag
+        let stream_response = serde_json::json!({
+            "id": format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+            "object": "chat.completion.chunk",
+            "created": chrono::Utc::now().timestamp(),
+            "model": request_clone.deepseek_config.body.get("model").unwrap_or(&serde_json::json!("deepseek-chat")),
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "content": "<thinking>\n"
+                },
+                "finish_reason": null
+            }],
+            "usage": {
+                "prompt_tokens":0,
+                "completion_tokens":0,
+                "total_tokens":0,
+            }
+        });
         let _ = tx
-            .send(Ok(Event::default().event("content").data(
-                serde_json::to_string(&StreamEvent::Content {
-                    content: vec![ContentBlock {
-                        content_type: "text".to_string(),
-                        text: "<thinking>\n".to_string(),
-                    }],
-                })
-                .unwrap_or_default(),
+            .send(Ok(Event::default().data(
+                serde_json::to_string(&stream_response).unwrap_or_default(),
             )))
             .await;
         
@@ -371,17 +387,29 @@ pub(crate) async fn chat_stream(
                                     tracing::info!("Updated current_chunk: {}", current_chunk);
                                     if current_chunk.contains("<think>") && !current_chunk.contains("</think>"){
                                         if content != "<think>" {
+                                        let stream_response = serde_json::json!({
+                                            "id": format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+                                            "object": "chat.completion.chunk",
+                                            "created": chrono::Utc::now().timestamp(),
+                                            "model": request_clone.deepseek_config.body.get("model").unwrap_or(&serde_json::json!("deepseek-chat")),
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {
+                                                    "content": content
+                                                },
+                                                "finish_reason": null
+                                            }],
+                                            "usage": {
+                                                "prompt_tokens":0,
+                                                "completion_tokens":0,
+                                                "total_tokens":0,
+                                            }
+                                        });
                                         let _ = tx
-                                        .send(Ok(Event::default().event("content").data(
-                                            serde_json::to_string(&StreamEvent::Content {
-                                                content: vec![ContentBlock {
-                                                    content_type: "text_delta".to_string(),
-                                                    text: content.to_string(),
-                                                }],
-                                            })
-                                            .unwrap_or_default(),
-                                        )))
-                                        .await;
+                                            .send(Ok(Event::default().data(
+                                                serde_json::to_string(&stream_response).unwrap_or_default(),
+                                            )))
+                                            .await;
                                         }
                                     }
                                     if current_chunk.contains("<think>") && current_chunk.contains("</think>") {
@@ -400,16 +428,27 @@ pub(crate) async fn chat_stream(
                             if let Some(reasoning) = &delta.reasoning_content {
                                 tracing::info!("Found delta reasoning_content: {}", reasoning);
                                 if !reasoning.is_empty() {
-                                    // 直接发送 reasoning 作为流式输出
+                                    let stream_response = serde_json::json!({
+                                        "id": format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+                                        "object": "chat.completion.chunk",
+                                        "created": chrono::Utc::now().timestamp(),
+                                        "model": request_clone.deepseek_config.body.get("model").unwrap_or(&serde_json::json!("deepseek-chat")),
+                                        "choices": [{
+                                            "index": 0,
+                                            "delta": {
+                                                "content": reasoning
+                                            },
+                                            "finish_reason": null
+                                        }],
+                                        "usage": {
+                                            "prompt_tokens":0,
+                                            "completion_tokens":0,
+                                            "total_tokens":0,
+                                        }
+                                    });
                                     let _ = tx
-                                        .send(Ok(Event::default().event("content").data(
-                                            serde_json::to_string(&StreamEvent::Content {
-                                                content: vec![ContentBlock {
-                                                    content_type: "text_delta".to_string(),
-                                                    text: reasoning.to_string(),
-                                                }],
-                                            })
-                                            .unwrap_or_default(),
+                                        .send(Ok(Event::default().data(
+                                            serde_json::to_string(&stream_response).unwrap_or_default(),
                                         )))
                                         .await;
 
@@ -443,7 +482,7 @@ pub(crate) async fn chat_stream(
                 }
                 Err(e) => {
                     let _ = tx
-                        .send(Ok(Event::default().event("error").data(
+                        .send(Ok(Event::default().data(
                             serde_json::to_string(&StreamEvent::Error {
                                 message: e.to_string(),
                                 code: 500,
@@ -457,15 +496,27 @@ pub(crate) async fn chat_stream(
         }
         
         // Send closing thinking tag
+        let stream_response = serde_json::json!({
+            "id": format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+            "object": "chat.completion.chunk",
+            "created": chrono::Utc::now().timestamp(),
+            "model": request_clone.deepseek_config.body.get("model").unwrap_or(&serde_json::json!("deepseek-chat")),
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "content": "\n</thinking>"
+                },
+                "finish_reason": null
+            }],
+            "usage": {
+                "prompt_tokens":0,
+                "completion_tokens":0,
+                "total_tokens":0,
+            }
+        });
         let _ = tx
-            .send(Ok(Event::default().event("content").data(
-                serde_json::to_string(&StreamEvent::Content {
-                    content: vec![ContentBlock {
-                        content_type: "text".to_string(),
-                        text: "\n</thinking>".to_string(),
-                    }],
-                })
-                .unwrap_or_default(),
+            .send(Ok(Event::default().data(
+                serde_json::to_string(&stream_response).unwrap_or_default(),
             )))
             .await;
 
@@ -496,15 +547,27 @@ pub(crate) async fn chat_stream(
                                 if let Some(content) = &choice.delta.content {
                                     if !content.is_empty() {
                                         tracing::info!("OpenAI content chunk: {}", content);
+                                        let stream_response = serde_json::json!({
+                                            "id": format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+                                            "object": "chat.completion.chunk",
+                                            "created": chrono::Utc::now().timestamp(),
+                                            "model": request_clone.openai_config.body.get("model").unwrap_or(&serde_json::json!("gpt-3.5-turbo")),
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {
+                                                    "content": content
+                                                },
+                                                "finish_reason": null
+                                            }],
+                                            "usage": {
+                                                "prompt_tokens":0,
+                                                "completion_tokens":0,
+                                                "total_tokens":0,
+                                            }
+                                        });
                                         let _ = tx
-                                            .send(Ok(Event::default().event("content").data(
-                                                serde_json::to_string(&StreamEvent::Content {
-                                                    content: vec![ContentBlock {
-                                                        content_type: "text_delta".to_string(),
-                                                        text: content.to_string(),
-                                                    }],
-                                                })
-                                                .unwrap_or_default(),
+                                            .send(Ok(Event::default().data(
+                                                serde_json::to_string(&stream_response).unwrap_or_default(),
                                             )))
                                             .await;
                                     }
@@ -551,13 +614,8 @@ pub(crate) async fn chat_stream(
                                     // Only send content event if there's actual content to send
                                     if !message.content.is_empty() {
                                         let _ = tx
-                                            .send(Ok(Event::default().event("content").data(
-                                                serde_json::to_string(&StreamEvent::Content { 
-                                                    content: message.content.into_iter()
-                                                        .map(ContentBlock::from_anthropic)
-                                                        .collect()
-                                                })
-                                                .unwrap_or_default(),
+                                            .send(Ok(Event::default().data(
+                                                serde_json::to_string(&message.content).unwrap_or_default(),
                                             )))
                                             .await;
                                     }
@@ -566,14 +624,8 @@ pub(crate) async fn chat_stream(
                                     tracing::info!("Anthropic content delta: {:?}", delta);
                                     // Send content update
                                     let _ = tx
-                                        .send(Ok(Event::default().event("content").data(
-                                            serde_json::to_string(&StreamEvent::Content {
-                                                content: vec![ContentBlock {
-                                                    content_type: delta.delta_type,
-                                                    text: delta.text,
-                                                }],
-                                            })
-                                            .unwrap_or_default(),
+                                        .send(Ok(Event::default().data(
+                                            serde_json::to_string(&delta).unwrap_or_default(),
                                         )))
                                         .await;
                                 }
@@ -585,7 +637,7 @@ pub(crate) async fn chat_stream(
                         Err(e) => {
                             tracing::error!("Anthropic stream error: {}", e);
                             let _ = tx
-                                .send(Ok(Event::default().event("error").data(
+                                .send(Ok(Event::default().data(
                                     serde_json::to_string(&StreamEvent::Error {
                                         message: e.to_string(),
                                         code: 500,
@@ -603,10 +655,7 @@ pub(crate) async fn chat_stream(
 
         // Send done event
         let _ = tx
-            .send(Ok(Event::default().event("done").data(
-                serde_json::to_string(&StreamEvent::Done)
-                    .unwrap_or_default(),
-            )))
+            .send(Ok(Event::default().data("[DONE]")))
             .await;
     });
 
@@ -657,5 +706,233 @@ impl From<serde_json::Error> for ApiError {
         ApiError::Internal {
             message: format!("JSON error: {}", err),
         }
+    }
+}
+
+/// OpenAI compatible chat completion request format
+#[derive(Debug, Deserialize)]
+pub struct OpenAICompatRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    #[serde(default)]
+    pub stream: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Value,
+}
+
+/// OpenAI compatible chat completion response format
+#[derive(Debug, Serialize)]
+pub struct OpenAICompatResponse {
+    pub id: String,
+    pub object: String,
+    pub created: i64,
+    pub model: String,
+    pub choices: Vec<OpenAICompatChoice>,
+    pub usage: OpenAICompatUsage,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenAICompatChoice {
+    pub index: i32,
+    pub message: OpenAICompatMessage,
+    pub finish_reason: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenAICompatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenAICompatUsage {
+    pub prompt_tokens: i32,
+    pub completion_tokens: i32,
+    pub total_tokens: i32,
+}
+
+/// 从headers中提取token和目标模型
+fn get_auth_info(headers: &axum::http::HeaderMap) -> Result<(String, String, String)> {
+    let auth_token = headers
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .unwrap_or("")
+        .to_string();
+
+    let target_model = headers
+        .get("X-Target-Model")
+        .map(|h| h.to_str().unwrap_or("openai"))
+        .unwrap_or("openai");
+
+    Ok((auth_token, target_model.to_string(), target_model.to_string()))
+}
+
+/// 构建内部请求的headers
+fn build_internal_headers(
+    original_headers: axum::http::HeaderMap,
+    token_config: &TokenConfig,
+    endpoints: &EndpointConfig,
+) -> Result<axum::http::HeaderMap> {
+    let mut headers = original_headers.clone();
+    
+    // 对于Ollama，我们需要使用特殊的认证方式
+    headers.insert(
+        "X-DeepSeek-API-Token",  // 使用标准Authorization header
+        HeaderValue::from_str(&format!("Bearer {}", token_config.deepseek_token))
+            .map_err(|e| ApiError::Internal {
+                message: format!("Invalid header value: {}", e)
+            })?
+    );
+
+    headers.insert(
+        "X-OpenAI-API-Token",
+        HeaderValue::from_str(&token_config.openai_token)
+            .map_err(|e| ApiError::Internal {
+                message: format!("Invalid header value: {}", e)
+            })?
+    );
+    
+    headers.insert(
+        "X-Anthropic-API-Token",
+        HeaderValue::from_str(&token_config.anthropic_token)
+            .map_err(|e| ApiError::Internal {
+                message: format!("Invalid header value: {}", e)
+            })?
+    );
+    
+    
+    // 设置其他必要的headers
+    headers.insert(
+        "X-Target-Model",
+        HeaderValue::from_static("openai")
+    );
+    
+    headers.insert(
+        DEEPSEEK_ENDPOINT_URL_HEADER,
+        HeaderValue::from_str(&endpoints.deepseek)
+            .map_err(|e| ApiError::Internal {
+                message: format!("Invalid header value: {}", e)
+            })?
+    );
+    
+    headers.insert(
+        OPENAI_ENDPOINT_URL_HEADER,
+        HeaderValue::from_str(&endpoints.openai)
+            .map_err(|e| ApiError::Internal {
+                message: format!("Invalid header value: {}", e)
+            })?
+    );
+
+    Ok(headers)
+}
+
+/// Handler for OpenAI compatible chat completions endpoint
+pub async fn handle_openai_chat(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(openai_request): Json<OpenAICompatRequest>,
+) -> Result<axum::response::Response> {
+    // 获取认证信息
+    let (auth_token, _, _) = get_auth_info(&headers)?;
+
+    // 获取token配置
+    let token_config = state.config.auth.token_mappings
+        .get(&auth_token)
+        .unwrap_or(&state.config.auth.default_tokens);
+
+    // 获取模型配置
+    let model_config = &state.config.models;
+    
+    // 查找模型映射
+    let model_mapping = model_config.model_mappings
+        .get(&openai_request.model)
+        .cloned()
+        .unwrap_or_else(|| ModelMapping {
+            deepseek_model: model_config.default_deepseek.clone(),
+            target_model: model_config.default_openai.clone(),
+            parameters: serde_json::json!({}),
+        });
+
+    // 合并配置参数
+    let mut model_params = model_mapping.parameters.clone();
+    if let Some(extra) = openai_request.extra.as_object() {
+        for (key, value) in extra {
+            model_params[key] = value.clone();
+        }
+    }
+
+    // 构建内部请求格式
+    let internal_request = ApiRequest {
+        stream: openai_request.stream,
+        verbose: false,
+        system: None,
+        messages: openai_request.messages,
+        deepseek_config: ApiConfig {
+            headers: HashMap::from([
+                ("Authorization".to_string(), format!("Bearer {}", token_config.deepseek_token))
+            ]),
+            body: serde_json::json!({
+                "model": model_mapping.deepseek_model,
+                "temperature": model_params.get("temperature").unwrap_or(&serde_json::json!(0.7)),
+                "max_tokens": model_params.get("max_tokens").unwrap_or(&serde_json::json!(4096))
+            }),
+        },
+        openai_config: ApiConfig {
+            headers: HashMap::from([
+                ("Authorization".to_string(), format!("Bearer {}", token_config.openai_token))
+            ]),
+            body: serde_json::json!({
+                "model": model_mapping.target_model,
+                "temperature": model_params.get("temperature").unwrap_or(&serde_json::json!(0.7)),
+                "max_tokens": model_params.get("max_tokens").unwrap_or(&serde_json::json!(4096))
+            }),
+        },
+        anthropic_config: ApiConfig::default(),
+    };
+
+    // 构建新的headers
+    let new_headers = build_internal_headers(headers, token_config, &state.config.endpoints)?;
+
+    // 根据stream参数选择处理方式
+    if openai_request.stream {
+        let stream_response = chat_stream(
+            State(state),
+            new_headers,
+            Json(internal_request),
+        ).await?;
+        Ok(stream_response.into_response())
+    } else {
+        let response = chat(
+            State(state),
+            new_headers,
+            Json(internal_request),
+        ).await?;
+        
+        // 转换为OpenAI格式响应
+        let openai_response = OpenAICompatResponse {
+            id: format!("chatcmpl-{}", Uuid::new_v4()),
+            object: "chat.completion".to_string(),
+            created: Utc::now().timestamp(),
+            model: openai_request.model,
+            choices: vec![OpenAICompatChoice {
+                index: 0,
+                message: OpenAICompatMessage {
+                    role: "assistant".to_string(),
+                    content: response.0.content.iter()
+                        .map(|block| block.text.clone())
+                        .collect::<Vec<_>>()
+                        .join(""),
+                },
+                finish_reason: "stop".to_string(),
+            }],
+            usage: OpenAICompatUsage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            },
+        };
+
+        Ok(Json(openai_response).into_response())
     }
 }

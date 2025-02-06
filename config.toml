@@ -1,4 +1,35 @@
 # Server Configuration
 [server]
 host = "127.0.0.1"
-port = 1337
+port = 3000
+
+[endpoints]
+deepseek = "http://localhost:11434/v1/chat/completions"
+anthropic = "http://localhost:11434/v1/chat/completions"
+openai = "http://localhost:11434/v1/chat/completions"
+
+[models]
+default_deepseek = "deepseek-r1:14b"
+default_openai = "qwen2.5:14b"
+default_anthropic = "claude-3-sonnet-20240229"
+
+[models.model_mappings.gpt-3]
+deepseek_model = "deepseek-r1:14b"
+target_model = "qwen2.5:14b"
+parameters = { temperature = 0.7, max_tokens = 4096 }
+
+[models.model_mappings.gpt-4]
+deepseek_model = "deepseek-r1:14b"
+target_model = "qwen2.5:14b"
+parameters = { temperature = 0.7, max_tokens = 8192 }
+
+[auth.default_tokens]
+deepseek_token = "ollama"
+openai_token = "ollama"
+anthropic_token = "ollama"
+
+# 可以为不同的API key配置不同的token映射
+[auth.token_mappings."sk-xxxx"]
+deepseek_token = "ollama"
+openai_token = "ollama"
+anthropic_token = "ollama"
